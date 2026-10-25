@@ -1,0 +1,114 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Movies API",
+    "version": "1.0.0",
+    "description": "Сервис-обёртка над внешним фильм-стендом."
+  },
+  "paths": {
+    "/load-movies": {
+      "get": {
+        "summary": "Загрузить фильмы в диапазоне [from; to]",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "description": "id первого фильма",
+            "schema": { "type": "integer", "minimum": 1 }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "description": "id последнего фильма",
+            "schema": { "type": "integer", "minimum": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Массив фильмов. Если часть фильмов не загрузилась, для них в массиве приходит элемент с полями id и error (и заголовок X-Failed-Count).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/MovieItem" }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "502": { "$ref": "#/components/responses/BadGateway" },
+          "504": { "$ref": "#/components/responses/GatewayTimeout" }
+        }
+      }
+    },
+    "/last-movie": {
+      "get": {
+        "summary": "Найти последний доступный фильм",
+        "responses": {
+          "200": {
+            "description": "Последний фильм на стенде",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Movie" }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "502": { "$ref": "#/components/responses/BadGateway" },
+          "504": { "$ref": "#/components/responses/GatewayTimeout" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Movie": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "example": 1 },
+          "title": { "type": "string", "example": "To Rome with Love" },
+          "year": { "type": "integer", "example": 2012 },
+          "director": { "type": "string", "example": "Woody Allen" }
+        }
+      },
+      "MovieItem": {
+        "type": "object",
+        "description": "Фильм либо, если загрузка не удалась, id с описанием ошибки.",
+        "properties": {
+          "id": { "type": "integer" },
+          "title": { "type": "string" },
+          "year": { "type": "integer" },
+          "director": { "type": "string" },
+          "error": { "type": "string", "description": "Заполнено только если фильм не загрузился" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Некорректные параметры from/to",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "NotFound": {
+        "description": "Фильм не найден на стенде",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "BadGateway": {
+        "description": "Ошибка внешнего стенда",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "GatewayTimeout": {
+        "description": "Стенд не ответил за отведённое время",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      }
+    }
+  }
+}
