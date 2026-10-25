@@ -3,11 +3,11 @@ on:
   workflow_dispatch:
     inputs:
       student-repository:
-        description: 'Student repository: owner/repository (public)'
+        description: 'Student repository: Enotik303/golang_homework (public)'
         required: true
         type: string
       student-ref:
-        description: 'Branch, SHA or PR ref, for example refs/pull/2/head'
+        description: 'Branch, SHA or PR ref, for example homework-3'
         default: main
         required: true
         type: string
