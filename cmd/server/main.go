@@ -1,4 +1,3 @@
-
 package main
 
 import (
@@ -15,10 +14,10 @@ import (
 	"google.golang.org/grpc"
 
 	"movieservice/gen/moviepb"
-	"movieservice/internal/config"
-	"movieservice/internal/grpcapi"
-	"movieservice/internal/httpapi"
-	"movieservice/internal/movies"
+	"movieservice/internal/adapter/moviestand"
+	"movieservice/internal/handler/grpchandler"
+	"movieservice/internal/handler/httphandler"
+	"movieservice/internal/usecase"
 )
 
 func main() {
@@ -29,39 +28,39 @@ func main() {
 }
 
 func run() error {
-	cfg, err := config.Load()
+	cfg, err := loadConfig()
 	if err != nil {
 		return err
 	}
 
-	client := movies.NewClient(cfg.MovieBaseURL, cfg.RequestTimeout)
-	svc := movies.NewService(client, cfg.Workers)
+	provider := moviestand.NewClient(cfg.movieBaseURL, cfg.requestTimeout)
+	uc := usecase.NewService(provider, cfg.workers)
 
 	httpSrv := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(svc),
+		Addr:              cfg.httpAddr,
+		Handler:           httphandler.NewRouter(uc),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	lis, err := net.Listen("tcp", cfg.GRPCAddr)
+	lis, err := net.Listen("tcp", cfg.grpcAddr)
 	if err != nil {
 		return err
 	}
 	grpcSrv := grpc.NewServer()
-	moviepb.RegisterMovieServiceServer(grpcSrv, grpcapi.NewServer(svc))
+	moviepb.RegisterMovieServiceServer(grpcSrv, grpchandler.NewServer(uc))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	errCh := make(chan error, 2)
 	go func() {
-		slog.Info("HTTP-сервер запущен", "addr", cfg.HTTPAddr)
+		slog.Info("HTTP-сервер запущен", "addr", cfg.httpAddr)
 		if err := httpSrv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()
 	go func() {
-		slog.Info("gRPC-сервер запущен", "addr", cfg.GRPCAddr)
+		slog.Info("gRPC-сервер запущен", "addr", cfg.grpcAddr)
 		if err := grpcSrv.Serve(lis); err != nil {
 			errCh <- err
 		}
@@ -87,7 +86,7 @@ func run() error {
 	select {
 	case <-stopped:
 	case <-shutdownCtx.Done():
-		grpcSrv.Stop() 
+		grpcSrv.Stop()
 	}
 	return runErr
 }

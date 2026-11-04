@@ -1,9 +1,10 @@
-package httpapi
+package httphandler
 
 import (
 	_ "embed"
 	"net/http"
 )
+
 //go:embed openapi.json
 var openAPISpec []byte
 

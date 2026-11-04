@@ -1,5 +1,4 @@
-
-package httpapi
+package httphandler
 
 import (
 	"context"
@@ -7,18 +6,15 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 
-	"movieservice/internal/movies"
+	"movieservice/internal/domain"
+	"movieservice/internal/usecase"
 )
 
-type MovieService interface {
-	LoadRange(ctx context.Context, from, to int) ([]movies.Result, error)
-	Last(ctx context.Context) (movies.Movie, error)
-}
-
 type Handler struct {
-	svc MovieService
+	uc usecase.MovieUseCase
 }
 
 type movieDTO struct {
@@ -33,8 +29,8 @@ type errorBody struct {
 	Error string `json:"error"`
 }
 
-func NewRouter(svc MovieService) http.Handler {
-	h := &Handler{svc: svc}
+func NewRouter(uc usecase.MovieUseCase) http.Handler {
+	h := &Handler{uc: uc}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /load-movies", h.loadMovies)
@@ -53,35 +49,30 @@ func (h *Handler) loadMovies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results, err := h.svc.LoadRange(r.Context(), from, to)
-	if err != nil {
+	movies, err := h.uc.LoadMovies(r.Context(), from, to)
+
+	var partial *domain.PartialLoadError
+	if err != nil && !errors.As(err, &partial) {
 		writeError(w, err)
 		return
 	}
 
-	items := make([]movieDTO, 0, len(results))
-	failed := 0
-	for _, res := range results {
-		if res.Err != nil {
-			failed++
-			items = append(items, movieDTO{ID: res.ID, Error: res.Err.Error()})
-			continue
+	items := make([]movieDTO, 0, len(movies))
+	for _, m := range movies {
+		items = append(items, toDTO(m))
+	}
+	if partial != nil {
+		for _, f := range partial.Failures {
+			items = append(items, movieDTO{ID: f.ID, Error: f.Err.Error()})
 		}
-		items = append(items, toDTO(res.Movie))
-	}
-
-	if failed == len(results) {
-		writeError(w, results[0].Err)
-		return
-	}
-	if failed > 0 {
-		w.Header().Set("X-Failed-Count", strconv.Itoa(failed))
+		sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+		w.Header().Set("X-Failed-Count", strconv.Itoa(len(partial.Failures)))
 	}
 	writeJSON(w, http.StatusOK, items)
 }
 
 func (h *Handler) lastMovie(w http.ResponseWriter, r *http.Request) {
-	m, err := h.svc.Last(r.Context())
+	m, err := h.uc.GetLastMovie(r.Context())
 	if err != nil {
 		writeError(w, err)
 		return
@@ -89,7 +80,7 @@ func (h *Handler) lastMovie(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toDTO(m))
 }
 
-func toDTO(m movies.Movie) movieDTO {
+func toDTO(m domain.Movie) movieDTO {
 	return movieDTO{ID: m.ID, Title: m.Title, Year: m.Year, Director: m.Director}
 }
 
@@ -105,15 +96,15 @@ func intParam(w http.ResponseWriter, r *http.Request, name string) (int, bool) {
 
 func statusFor(err error) int {
 	switch {
-	case errors.Is(err, movies.ErrInvalidRange):
+	case errors.Is(err, domain.ErrInvalidRange):
 		return http.StatusBadRequest
-	case errors.Is(err, movies.ErrNotFound):
+	case errors.Is(err, domain.ErrNotFound):
 		return http.StatusNotFound
 	case errors.Is(err, context.DeadlineExceeded):
 		return http.StatusGatewayTimeout
 	case errors.Is(err, context.Canceled):
-		return 499 // клиент сам оборвал запрос
-	case errors.Is(err, movies.ErrRateLimited):
+		return 499
+	case errors.Is(err, domain.ErrRateLimited):
 		return http.StatusServiceUnavailable
 	default:
 		return http.StatusBadGateway
